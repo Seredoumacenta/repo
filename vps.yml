@@ -1,0 +1,75 @@
+version: 2.1
+
+orbs:
+  github-release: haskell-works/github-release@1.3.3
+
+parameters:
+  src-repo-url:
+    type: string
+    default: https://github.com/esnet/iperf.git
+  branch-name:
+    type: string
+    default: "3.8.1"
+  common-build-params:
+    type: string
+    default: "--disable-shared --disable-static"
+
+jobs:
+  build-linux:
+    docker:
+      - image: archlinux/base
+        auth:
+          username: mydockerhub-user
+          password: $DOCKERHUB_PASSWORD  # context / project UI env-var reference
+    parameters:
+      label:
+        type: string
+        default: iperf3-linux
+    steps:
+      - run:
+          name: Install dependencies
+          command: pacman -Syu --noconfirm openssl git gcc make awk tar
+      - run:
+          name: Clone iperf3
+          command: git clone << pipeline.parameters.src-repo-url >> -b << pipeline.parameters.branch-name >>
+      - run:
+          name: Build iperf3
+          working_directory: iperf
+          command: |
+            CIRCLE_WORKING_DIRECTORY=$(eval "echo $CIRCLE_WORKING_DIRECTORY")
+            IPERF3_MAKE_PREFIX=$CIRCLE_WORKING_DIRECTORY/<< parameters.label >>
+            ./configure --prefix=$IPERF3_MAKE_PREFIX << pipeline.parameters.common-build-params >>
+            make
+            mkdir -p $IPERF3_MAKE_PREFIX
+            make install
+      - run:
+          name: Create a tarball
+          command: tar -cJf << parameters.label >>.tar.xz << parameters.label >>
+      - persist_to_workspace:
+          root: .
+          paths:
+            - << parameters.label >>.tar.xz
+      - store_artifacts:
+          path: << parameters.label >>.tar.xz
+
+  
+          command: |
+            docker pull ubuntu
+            docker image ls
+            docker images
+            docker network
+            docker inspect bridge
+            docker run -it --name ubuntu
+workflows:
+  build-test-release:
+    jobs:
+      - build-linux
+      - test-linux:
+          requires:
+            - build-linux
+          requires:
+            - test-linux
+          context: github
+          filters:
+            branches:
+              only: main
